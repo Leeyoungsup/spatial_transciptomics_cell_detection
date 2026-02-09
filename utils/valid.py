@@ -175,29 +175,25 @@ def visualize_ground_truth_and_prediction_separately(model, dataset, idx=0, conf
     img = img.cpu() / 255.
     # Subplot 1: Ground Truth (실제 라벨)
     ax1.imshow(img.permute(1, 2, 0).cpu().numpy())
-    class_names = {
-    0: "epithelial",
-    1: "Basal/Myoepithelial",
-    2: "Smooth muscle",
-    3: "Fibroblast",
-    4: "Endothelial",
-    5: "Lymphocyte",                # T + B 통합
-    6: "Plasma cell",
-    7: "Macrophage/Histiocyte",     # 통합
-    8: "Neutrophil",
-    9: "Adipocyte",
-    10: "Other/Unknown"
-}
-    colors = ["#FF0000","#FFA500",
-    "#8B4513",
-    "#00FF00",
-    "#0000FF",
-    "#FFFF00",
-    "#FF00FF",
-    "#9400D3",
-    "#00FFFF",
-    "#FF6060",
-    "#808080"]
+    class_names ={
+    0: "Epithelial",
+    1: "Stromal",
+    2: "Lymphoplasmacytic",
+    3: "Granulocyte",
+    }
+
+    class_colors_hex = {
+        "Epithelial": "#FF0000",           # 빨강
+        "Stromal": "#00FF00",              # 초록
+        "Lymphoplasmacytic": "#FFFF00",    # 노랑
+        "Granulocyte": "#1E90FF",          # DodgerBlue (밝은 파랑)
+
+    }
+
+    colors = ["#FF0000","#00FF00",
+        "#FFFF00",
+        "#1E90FF",
+    ]
     for i in range(len(cls)):
         class_id = int(cls[i].item())
         x_center, y_center, w, h = box[i].tolist()
