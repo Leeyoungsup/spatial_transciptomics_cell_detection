@@ -715,6 +715,11 @@ def compute_point_label_metrics(model, val_loader, device, params, distance_thre
                     # 거리 행렬 계산
                     distance_matrix = compute_distance_matrix(gt_centers, pred_centers)
                     
+                    # ⚠️ NaN/Inf 체크 및 처리
+                    if np.any(np.isnan(distance_matrix)) or np.any(np.isinf(distance_matrix)):
+                        # NaN/Inf를 매우 큰 값으로 대체 (매칭되지 않도록)
+                        distance_matrix = np.nan_to_num(distance_matrix, nan=1e10, posinf=1e10, neginf=1e10)
+                    
                     # Hungarian Algorithm으로 최적 매칭
                     if distance_matrix.size > 0 and distance_matrix.shape[0] > 0 and distance_matrix.shape[1] > 0:
                         gt_indices, pred_indices = linear_sum_assignment(distance_matrix)
