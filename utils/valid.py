@@ -1149,3 +1149,129 @@ def compute_point_label_metrics(model, val_loader, device, params, distance_thre
         'overall_recall': overall_recall,
         'class_stats': class_stats
     }
+    
+def visualize_ground_truth_and_prediction_separately_detail_single(model, dataset, idx=0, conf_threshold=0.5, iou_threshold=0.3, epoch=None, save_dir=None):
+    """실제 라벨과 예측 라벨을 subplot으로 좌우에 표시하는 함수 (일반 YOLO, tissue context 없음)"""
+    if len(dataset) <= idx:
+        print(f"경고: 데이터셋이 비어 있거나 idx {idx}가 데이터셋 크기({len(dataset)})보다 큽니다.")
+        return
+    
+    model.eval()
+    img, cls, box, _ = dataset[idx]
+    
+    # 모델이 있는 device 가져오기
+    model_device = next(model.parameters()).device
+    
+    # 하나의 figure에 2개의 subplot 생성 (1행 2열)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+    img = img.cpu() / 255.
+    # Subplot 1: Ground Truth (실제 라벨)
+    ax1.imshow(img.permute(1, 2, 0).cpu().numpy())
+    class_names ={
+    0: "Epithelial",
+    1: "Stromal",
+    2: "Lymphocyte",
+    3: "Plasma",
+    4: "Neutrophil",
+    5: "Eosinophil",
+    }
+
+
+    colors = ["#FF0000","#00FF00",
+        "#FFFF00",
+        "#FF00FF",
+        "#1E90FF",
+        "#FFA500",
+    ]
+
+    class_colors_hex = {
+        "Epithelial": "#FF0000",           # 빨강
+        "Stromal": "#00FF00",              # 초록
+        "Lymphocyte": "#FFFF00",           # 노랑
+        "Plasma": "#FF00FF",               # 마젠타
+        "Neutrophil": "#1E90FF",           # DodgerBlue (밝은 파랑)
+        "Eosinophil": "#FFA500",           # 오렌지
+    }
+    for i in range(len(cls)):
+        class_id = int(cls[i].item())
+        x_center, y_center, w, h = box[i].tolist()
+        
+        x = (x_center - w/2) * img.shape[2]
+        y = (y_center - h/2) * img.shape[1]
+        w_box = w * img.shape[2]
+        h_box = h * img.shape[1]
+        color=colors[class_id]
+        # 중심점 표시
+        # 중심점 좌표 계산
+        center_x = int(x + w_box / 2)
+        center_y = int(y + h_box / 2)
+
+        ax1.scatter(center_x, center_y, facecolors='none',  s=20, marker='o', edgecolors=color, linewidths=1)
+
+    gt_title = f'Ground Truth'
+    if epoch is not None:
+        gt_title += f' - Epoch {epoch}'
+    ax1.set_title(gt_title, fontsize=16, fontweight='bold')
+    ax1.axis('off')
+    
+    # Subplot 2: Model Prediction (예측 라벨)
+    ax2.imshow(img.permute(1, 2, 0).cpu().numpy())
+    prediction_count = 0
+    with torch.no_grad():
+        img_input = img.unsqueeze(0).to(model_device)
+        with torch.amp.autocast('cuda'):
+            pred = model(img_input)
+
+        # NMS 적용
+        results = util.non_max_suppression(pred, confidence_threshold=conf_threshold, iou_threshold=iou_threshold)
+        if len(results[0]) > 0:
+            for *xyxy, conf, cls_id in results[0]:
+                x1, y1, x2, y2 = xyxy
+                x1, y1, x2, y2 = x1.item(), y1.item(), x2.item(), y2.item()
+                w_pred = x2 - x1
+                h_pred = y2 - y1
+                
+                
+                color = colors[int(cls_id.item())]
+                center_x = (x1 + x2)//2
+                center_y = (y1 + y2)//2
+                ax2.scatter(center_x, center_y, facecolors='none',  s=20, marker='o', edgecolors=color, linewidths=1)
+
+                prediction_count += 1
+        
+        if prediction_count == 0:
+            ax2.text(img.shape[2]//2, img.shape[1]//2, 'No Predictions', 
+                     fontsize=20, color='white', ha='center', va='center',
+                     bbox=dict(facecolor='red', alpha=0.8, pad=10))
+    
+    pred_title = f'Model Prediction - {prediction_count} detections'
+    if epoch is not None:
+        pred_title += f' - Epoch {epoch}'
+    ax2.set_title(pred_title, fontsize=16, fontweight='bold')
+    ax2.axis('off')
+    
+    # 전체 figure 제목 설정
+    if epoch is not None:
+        fig.suptitle(f'Validation Comparison - Epoch {epoch}, Sample {idx+1}', 
+                     fontsize=18, fontweight='bold', y=0.95)
+    
+    # 범례 추가
+    legend_elements = [
+        patches.Patch(color=colors[i], label=class_names[i]) for i in range(len(colors))
+    ]
+    fig.legend(handles=legend_elements, loc='lower center', ncol=4, 
+               bbox_to_anchor=(0.5, 0.02), fontsize=12)
+    
+    # 레이아웃 조정
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.15, top=0.85)
+    
+    # 저장
+    if save_dir and epoch:
+        save_path = os.path.join(save_dir, f'validation_comparison_epoch_{epoch}.png')
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"✅ 비교 이미지 저장: {save_path}")
+    
+    # plt.show()
+    plt.clf()
+
