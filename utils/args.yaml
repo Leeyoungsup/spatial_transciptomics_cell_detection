@@ -18,15 +18,7 @@ flip_lr: 0.50000000000            # image flip left-right (probability)
 mosaic: 1.000000000000            # image mosaic (probability)
 mix_up: 0.000000000000            # image mix-up (probability)
 names:
-    0: "epithelial"
-    1: "Basal/Myoepithelial"
-    2: "Smooth muscle"
-    3: "Fibroblast"
-    4: "Endothelial"
-    5: "Lymphocyte"               # T + B 통합
-    6: "Plasma cell"
-    7: "Macrophage/Histiocyte"    # 통합
-    8: "Neutrophil"
-    9: "Adipocyte"
-    10: "Other/Unknown"
-
+    0: "Epithelial"
+    1: "Stromal"
+    2: "Lymphoplasmacytic"
+    3: "Granulocyte"

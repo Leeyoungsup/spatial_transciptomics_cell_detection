@@ -161,6 +161,126 @@ Best Macro F1: {max(val_macro_f1s):.4f} (Epoch {val_macro_f1s.index(max(val_macr
     # plt.close()
 
 
+def visualize_ground_truth_and_prediction_separately_single(model, dataset, idx=0, conf_threshold=0.5, iou_threshold=0.3, epoch=None, save_dir=None):
+    """실제 라벨과 예측 라벨을 subplot으로 좌우에 표시하는 함수 (일반 YOLO, tissue context 없음)"""
+    if len(dataset) <= idx:
+        print(f"경고: 데이터셋이 비어 있거나 idx {idx}가 데이터셋 크기({len(dataset)})보다 큽니다.")
+        return
+    
+    model.eval()
+    img, cls, box, _ = dataset[idx]
+    
+    # 모델이 있는 device 가져오기
+    model_device = next(model.parameters()).device
+    
+    # 하나의 figure에 2개의 subplot 생성 (1행 2열)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+    img = img.cpu() / 255.
+    # Subplot 1: Ground Truth (실제 라벨)
+    ax1.imshow(img.permute(1, 2, 0).cpu().numpy())
+    class_names ={
+    0: "Epithelial",
+    1: "Stromal",
+    2: "Lymphoplasmacytic",
+    3: "Granulocyte",
+    }
+
+    class_colors_hex = {
+        "Epithelial": "#FF0000",           # 빨강
+        "Stromal": "#00FF00",              # 초록
+        "Lymphoplasmacytic": "#FFFF00",    # 노랑
+        "Granulocyte": "#1E90FF",          # DodgerBlue (밝은 파랑)
+
+    }
+
+    colors = ["#FF0000","#00FF00",
+        "#FFFF00",
+        "#1E90FF",
+    ]
+    for i in range(len(cls)):
+        class_id = int(cls[i].item())
+        x_center, y_center, w, h = box[i].tolist()
+        
+        x = (x_center - w/2) * img.shape[2]
+        y = (y_center - h/2) * img.shape[1]
+        w_box = w * img.shape[2]
+        h_box = h * img.shape[1]
+        color=colors[class_id]
+        # 중심점 표시
+        # 중심점 좌표 계산
+        center_x = int(x + w_box / 2)
+        center_y = int(y + h_box / 2)
+
+        ax1.scatter(center_x, center_y, facecolors='none',  s=20, marker='o', edgecolors=color, linewidths=1)
+
+    gt_title = f'Ground Truth'
+    if epoch is not None:
+        gt_title += f' - Epoch {epoch}'
+    ax1.set_title(gt_title, fontsize=16, fontweight='bold')
+    ax1.axis('off')
+    
+    # Subplot 2: Model Prediction (예측 라벨)
+    ax2.imshow(img.permute(1, 2, 0).cpu().numpy())
+    prediction_count = 0
+    with torch.no_grad():
+        img_input = img.unsqueeze(0).to(model_device)
+        with torch.amp.autocast('cuda'):
+            pred = model(img_input)
+
+        # NMS 적용
+        results = util.non_max_suppression(pred, confidence_threshold=conf_threshold, iou_threshold=iou_threshold)
+        if len(results[0]) > 0:
+            for *xyxy, conf, cls_id in results[0]:
+                x1, y1, x2, y2 = xyxy
+                x1, y1, x2, y2 = x1.item(), y1.item(), x2.item(), y2.item()
+                w_pred = x2 - x1
+                h_pred = y2 - y1
+                
+                
+                color = colors[int(cls_id.item())]
+                center_x = (x1 + x2)//2
+                center_y = (y1 + y2)//2
+                ax2.scatter(center_x, center_y, facecolors='none',  s=20, marker='o', edgecolors=color, linewidths=1)
+
+                prediction_count += 1
+        
+        if prediction_count == 0:
+            ax2.text(img.shape[2]//2, img.shape[1]//2, 'No Predictions', 
+                     fontsize=20, color='white', ha='center', va='center',
+                     bbox=dict(facecolor='red', alpha=0.8, pad=10))
+    
+    pred_title = f'Model Prediction - {prediction_count} detections'
+    if epoch is not None:
+        pred_title += f' - Epoch {epoch}'
+    ax2.set_title(pred_title, fontsize=16, fontweight='bold')
+    ax2.axis('off')
+    
+    # 전체 figure 제목 설정
+    if epoch is not None:
+        fig.suptitle(f'Validation Comparison - Epoch {epoch}, Sample {idx+1}', 
+                     fontsize=18, fontweight='bold', y=0.95)
+    
+    # 범례 추가
+    legend_elements = [
+        patches.Patch(color=colors[i], label=class_names[i]) for i in range(len(colors))
+    ]
+    fig.legend(handles=legend_elements, loc='lower center', ncol=4, 
+               bbox_to_anchor=(0.5, 0.02), fontsize=12)
+    
+    # 레이아웃 조정
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.15, top=0.85)
+    
+    # 저장
+    if save_dir and epoch:
+        save_path = os.path.join(save_dir, f'validation_comparison_epoch_{epoch}.png')
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"✅ 비교 이미지 저장: {save_path}")
+    
+    # plt.show()
+    plt.clf()
+
+
 def visualize_ground_truth_and_prediction_separately(model, dataset, idx=0, conf_threshold=0.5, iou_threshold=0.3, epoch=None, save_dir=None):
     """실제 라벨과 예측 라벨을 subplot으로 좌우에 표시하는 함수 (tissue context 지원)"""
     if len(dataset) <= idx:
@@ -611,6 +731,214 @@ def compute_distance_matrix(centers1, centers2):
     distances = np.sqrt(np.sum(diff**2, axis=2))  # [N1, N2]
     
     return distances
+
+
+def compute_point_label_metrics_single(model, val_loader, device, params, distance_threshold=16):
+    """
+    Point-label에 최적화된 검증 메트릭 계산 (일반 YOLO, tissue context 없음)
+    - Distance-based matching (IoU 대신 중심점 거리 사용)
+    - Detection recall: GT 세포를 얼마나 찾았는가
+    - Classification accuracy: 찾은 세포의 클래스를 얼마나 정확하게 분류했는가
+    
+    Args:
+        model: YOLO 모델 (일반)
+        val_loader: 검증 데이터로더 (단일 이미지)
+        device: 디바이스
+        params: 파라미터 (클래스 이름 등)
+        distance_threshold: 매칭 거리 임계값 (픽셀 단위, 기본 16px)
+    
+    Returns:
+        dict: {
+            'detection_recall': GT 중 매칭된 비율,
+            'classification_accuracy': 매칭된 객체 중 올바르게 분류된 비율,
+            'macro_precision': 클래스별 평균 정밀도,
+            'macro_recall': 클래스별 평균 재현율,
+            'macro_f1': 클래스별 평균 F1,
+            'overall_recall': 전체 재현율,
+            'class_stats': 클래스별 상세 통계
+        }
+    """
+    try:
+        from scipy.optimize import linear_sum_assignment
+    except ImportError:
+        print("경고: scipy가 설치되지 않아 Point-label 메트릭을 계산할 수 없습니다.")
+        return {}
+    
+    model.eval()
+    
+    # 전체 통계
+    total_gt = 0
+    total_matched = 0
+    total_correct_class = 0
+    
+    # 클래스별 통계 (4개 클래스로 수정)
+    num_classes = len(params.get('names', {}))
+    class_tp = np.zeros(num_classes)  # True Positive (올바르게 탐지+분류)
+    class_fp = np.zeros(num_classes)  # False Positive (잘못 탐지 또는 잘못 분류)
+    class_fn = np.zeros(num_classes)  # False Negative (탐지 실패)
+    class_gt_count = np.zeros(num_classes)  # GT 개수
+    
+    with torch.no_grad():
+        for batch_idx, (images, targets) in enumerate(val_loader):
+            images = images.to(device).float() / 255
+            
+            # 예측 (단일 이미지)
+            with torch.amp.autocast('cuda'):
+                pred = model(images)
+            
+            # NMS 적용
+            results = util.non_max_suppression(pred, confidence_threshold=0.25, iou_threshold=0.45)
+            
+            # 각 이미지에 대해 처리
+            for i in range(len(images)):
+                # Ground truth 추출
+                cls_targets = targets['cls']
+                box_targets = targets['box']
+                idx_targets = targets['idx']
+                
+                batch_mask = idx_targets == i
+                if not batch_mask.any():
+                    continue
+                
+                batch_cls = cls_targets[batch_mask].cpu().numpy()
+                batch_box = box_targets[batch_mask].cpu().numpy()
+                
+                # GT 중심점 계산 (normalized -> pixel)
+                img_size = 512  # 이미지 크기
+                gt_centers = []
+                for box in batch_box:
+                    x_center = box[0] * img_size
+                    y_center = box[1] * img_size
+                    gt_centers.append([x_center, y_center])
+                gt_centers = np.array(gt_centers)
+                
+                # GT 클래스별 카운트
+                for cls_id in batch_cls:
+                    class_gt_count[int(cls_id)] += 1
+                
+                total_gt += len(batch_cls)
+                
+                # Predictions 처리
+                if len(results) > i and len(results[i]) > 0:
+                    pred_boxes = results[i][:, :4].cpu().numpy()  # xyxy
+                    pred_classes = results[i][:, 5].cpu().numpy()  # class
+                    
+                    # Prediction 중심점 계산
+                    pred_centers = []
+                    for box in pred_boxes:
+                        x_center = (box[0] + box[2]) / 2
+                        y_center = (box[1] + box[3]) / 2
+                        pred_centers.append([x_center, y_center])
+                    pred_centers = np.array(pred_centers)
+                    
+                    # 거리 행렬 계산
+                    distance_matrix = compute_distance_matrix(gt_centers, pred_centers)
+                    
+                    # ⚠️ NaN/Inf 체크 및 처리
+                    if np.any(np.isnan(distance_matrix)) or np.any(np.isinf(distance_matrix)):
+                        distance_matrix = np.nan_to_num(distance_matrix, nan=1e10, posinf=1e10, neginf=1e10)
+                    
+                    # Hungarian Algorithm으로 최적 매칭
+                    if distance_matrix.size > 0 and distance_matrix.shape[0] > 0 and distance_matrix.shape[1] > 0:
+                        gt_indices, pred_indices = linear_sum_assignment(distance_matrix)
+                        
+                        # 거리 임계값 이하인 매칭만 사용
+                        matched_gt = set()
+                        matched_pred = set()
+                        
+                        for gt_idx, pred_idx in zip(gt_indices, pred_indices):
+                            if distance_matrix[gt_idx, pred_idx] <= distance_threshold:
+                                matched_gt.add(gt_idx)
+                                matched_pred.add(pred_idx)
+                                total_matched += 1
+                                
+                                gt_cls = int(batch_cls[gt_idx])
+                                pred_cls = int(pred_classes[pred_idx])
+                                
+                                # 클래스가 일치하면 TP
+                                if gt_cls == pred_cls:
+                                    total_correct_class += 1
+                                    class_tp[gt_cls] += 1
+                                else:
+                                    # 클래스 불일치: GT는 FN, Pred는 FP
+                                    class_fn[gt_cls] += 1
+                                    class_fp[pred_cls] += 1
+                        
+                        # 매칭되지 않은 GT: False Negative
+                        for gt_idx in range(len(batch_cls)):
+                            if gt_idx not in matched_gt:
+                                gt_cls = int(batch_cls[gt_idx])
+                                class_fn[gt_cls] += 1
+                        
+                        # 매칭되지 않은 Pred: False Positive
+                        for pred_idx in range(len(pred_classes)):
+                            if pred_idx not in matched_pred:
+                                pred_cls = int(pred_classes[pred_idx])
+                                class_fp[pred_cls] += 1
+                    else:
+                        # 매칭 불가능: 모든 GT는 FN
+                        for cls_id in batch_cls:
+                            class_fn[int(cls_id)] += 1
+                else:
+                    # 예측 없음: 모든 GT는 FN
+                    for cls_id in batch_cls:
+                        class_fn[int(cls_id)] += 1
+    
+    # 메트릭 계산
+    detection_recall = total_matched / total_gt if total_gt > 0 else 0
+    classification_accuracy = total_correct_class / total_matched if total_matched > 0 else 0
+    
+    # 클래스별 메트릭
+    class_precision = []
+    class_recall = []
+    class_f1 = []
+    
+    for c in range(num_classes):
+        # Precision = TP / (TP + FP)
+        precision = class_tp[c] / (class_tp[c] + class_fp[c]) if (class_tp[c] + class_fp[c]) > 0 else 0
+        
+        # Recall = TP / (TP + FN)
+        recall = class_tp[c] / (class_tp[c] + class_fn[c]) if (class_tp[c] + class_fn[c]) > 0 else 0
+        
+        # F1 = 2 * (Precision * Recall) / (Precision + Recall)
+        f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+        
+        class_precision.append(precision)
+        class_recall.append(recall)
+        class_f1.append(f1)
+    
+    # Macro-averaged 메트릭 (클래스별 평균)
+    macro_precision = np.mean(class_precision)
+    macro_recall = np.mean(class_recall)
+    macro_f1 = np.mean(class_f1)
+    
+    # Overall Recall (전체 재현율)
+    overall_recall = np.sum(class_tp) / np.sum(class_tp + class_fn) if np.sum(class_tp + class_fn) > 0 else 0
+    
+    # 클래스별 상세 통계
+    class_names = params.get('names', {})
+    class_stats = {}
+    for c in range(num_classes):
+        class_name = class_names.get(c, f'Class_{c}')
+        class_stats[class_name] = {
+            'precision': class_precision[c],
+            'recall': class_recall[c],
+            'f1': class_f1[c],
+            'tp': int(class_tp[c]),
+            'fp': int(class_fp[c]),
+            'fn': int(class_fn[c]),
+            'gt_count': int(class_gt_count[c])
+        }
+    
+    return {
+        'detection_recall': detection_recall,
+        'classification_accuracy': classification_accuracy,
+        'macro_precision': macro_precision,
+        'macro_recall': macro_recall,
+        'macro_f1': macro_f1,
+        'overall_recall': overall_recall,
+        'class_stats': class_stats
+    }
 
 
 def compute_point_label_metrics(model, val_loader, device, params, distance_threshold=16):
