@@ -20,5 +20,8 @@ mix_up: 0.000000000000            # image mix-up (probability)
 names:
     0: "Epithelial"
     1: "Stromal"
-    2: "Lymphoplasmacytic"
-    3: "Granulocyte"
+    2: "Lymphocyte"
+    3: "Plasma"
+    4: "Neutrophil"
+    5: "Eosinophil"
+    6: "Other/Unknown"
